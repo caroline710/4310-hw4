@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+
+<head>
+  <meta charset="utf-8">
+  <link href="https://fonts.googleapis.com/css?family=Lato:400,700|Raleway:400,700" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://d3js.org/topojson.v3.min.js"></script>
+  <title>Top Baby Names</title>
+  <style>
+    body {
+      font-family: 'Lato', sans-serif;
+    }
+
+    #chart-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    line,
+    path {
+      fill: none;
+      stroke-width: 2;
+    }
+
+    .axis path,
+    .axis line {
+      fill: none;
+      stroke: grey;
+      shape-rendering: crispEdges;
+    }
+
+    hr {
+      border: 0;
+      height: 2px;
+      width: 550px;
+      background: #ccc;
+      margin-top: 10px;
+    }
+
+    #intro {
+      width: 550px;
+      margin: 15px auto;
+      font-size: 16px;
+      text-align: left;
+    }
+
+    #filters {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      margin-top: 40px;
+      margin-bottom: 40px;
+    }
+
+    .button {
+      background-color: #d3d3d3;
+      border: none;
+      border-radius: 3px;
+      padding: 5px 10px;
+      color: black;
+      cursor: pointer;
+      margin-right: 5px;
+      width: 100px;
+      display: inline-block;
+      text-align: center;
+    }
+
+    #filters button:hover {
+      opacity: 0.8;
+    }
+
+    .layer {
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="title" style="text-align: center; margin-top: 20px; font-size: 30px;">
+    Top 20 Baby Names Through the Decades
+  </div>
+  <hr>
+  <div id="intro">
+    Dive into the chart below to explore the popularity of baby names over time. Use the filters to view trends for
+    boys, girls, or all names and click on any name to see its detailed trend.
+  </div>
+  <div id="filters">
+    <button id="all" class="button">All</button>
+    <button id="boys" class="button">Boys</button>
+    <button id="girls" class="button">Girls</button>
+  </div>
+  <div id="chart-container">
+    <div id="chart"></div>
+  </div>
+  <div id="tooltip"
+    style="position: absolute; opacity: 0; background: #f8f8f8; border: 1px solid #f8f8f8; border-radius: 3px; padding: 10px; pointer-events: none;">
+    Tooltip
+  </div>
+
+  <script>
+
+    const margin = { top: 10, right: 20, bottom: 70, left: 70 },
+      width = 960 - margin.left - margin.right,
+      height = 500 - margin.top - margin.bottom;
+    const x = d3.scaleLinear().domain([1880, 2017]).range([0, width]);
+    const y = d3.scaleLinear().range([height, 0]);
+    const svg = d3.select("#chart").append("svg")
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+      .append("g")
+      .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+    const tooltip = d3.select("#tooltip");
+    let isShowingSelectedName = false;
+
+    async function requestData(sexFilter = 'All') {
+      const rawData = await d3.csv("top_20_babynames.csv");
+      let data = rawData.filter(d => +d.year >= 1880 && +d.year <= 2017).map(d => ({ ...d, year: +d.year }));
+      svg.selectAll("*").remove();
+      let keys = rawData.columns.slice(1);
+
+      let maleKeys = keys.filter(k => k.startsWith('M_'));
+      let femaleKeys = keys.filter(k => k.startsWith('F_'));
+      let sortedKeys = sexFilter === 'All' ? [...maleKeys, ...femaleKeys] : (sexFilter === 'M_' ? maleKeys : femaleKeys);
+
+      const stack = d3.stack().keys(sortedKeys)(data);
+      const area = d3.area().x(d => x(d.data.year)).y0(d => y(d[0])).y1(d => y(d[1]));
+      y.domain([0, d3.max(stack, layer => d3.max(layer, d => d[1]))]);
+
+      svg.selectAll(".layer").data(stack).enter().append("path")
+        .attr("class", "layer").attr("d", area)
+        .style("fill", d => d.key.startsWith("F_") ? "#FDB7C2" : "#A9D1EA")
+        .style("stroke", "#fff")
+        .style("stroke-width", "0.1px")
+        .attr("id", d => `path-${d.key}`)
+        .on("click", function (event, d) {
+          redrawGraphForName(d.key);
+        })
+        .on("mouseover", function () { tooltip.style("opacity", 1); })
+        .on("mousemove", function (event, d) {
+          const [xPos, yPos] = d3.pointer(event);
+          let year = Math.round(x.invert(xPos));
+          let decadeStart = year - year % 10;
+          let name = d.key.split("_")[1];
+          let sex = d.key.startsWith("F_") ? "Female" : "Male";
+          let nameColor = d.key.startsWith("F_") ? "#FDB7C2" : "#A9D1EA";
+
+          let decadeData = data.filter(row => row.year >= decadeStart && row.year < decadeStart + 10);
+          let birthsPerMillion = 0;
+          decadeData.forEach(row => {
+            birthsPerMillion += +row[d.key] || 0;
+          });
+          birthsPerMillion = birthsPerMillion / decadeData.length;
+
+          tooltip.html(`<span style="color: ${nameColor}; font-weight: bold; font-size: 16px;">${name}</span><br>Decade: ${decadeStart}s<br>Births per Million: ${Number(birthsPerMillion.toFixed(0)).toLocaleString()}`)
+            .style("left", (event.pageX + 10) + "px")
+            .style("top", (event.pageY - 10) + "px");
+        })
+        .on("mouseout", function () { tooltip.style("opacity", 0); });
+
+      const xAxis = d3.axisBottom(x).tickFormat(d3.format("d"));
+      svg.append("g").attr("transform", "translate(0," + height + ")").call(xAxis);
+      const yAxis = d3.axisLeft(y).tickFormat(d => d >= 1000 ? `${d / 1000}k` : d);
+      svg.append("g").call(yAxis);
+
+      // x-axis title
+      svg.append("text")
+        .attr("transform", `translate(${width / 2}, ${height + margin.top + 30})`)
+        .style("text-anchor", "middle")
+        .text("Year");
+
+      // y-axis title
+      svg.append("text")
+        .attr("transform", "rotate(-90)")
+        .attr("y", 0 - margin.left)
+        .attr("x", 0 - (height / 2))
+        .attr("dy", "1em")
+        .style("text-anchor", "middle")
+        .text("Births per Million");
+
+      function redrawGraphForName(nameKey) {
+        svg.selectAll("*").remove();
+        tooltip.style("opacity", 0);
+        svg.selectAll(".selected-name-text").remove();
+        isShowingSelectedName = true;
+
+        let filteredData = data.map(d => ({
+          year: d.year,
+          value: +d[nameKey] || 0
+        }));
+
+        let maxValue = d3.max(filteredData, d => d.value);
+        let cappedMaxValue = Math.min(maxValue, 100000); // cap at 100k
+
+        y.domain([0, cappedMaxValue]);
+
+        const newArea = d3.area()
+          .x(d => x(d.year))
+          .y0(height)
+          .y1(d => y(d.value));
+
+        svg.append("path")
+          .datum(filteredData)
+          .attr("class", "selected-name-layer")
+          .attr("d", newArea)
+          .style("fill", nameKey.startsWith("F_") ? "#FDB7C2" : "#A9D1EA")
+          .style("cursor", "crosshair")
+          .on("mouseover", function () { tooltip.style("opacity", 1); })
+          .on("mousemove", function (event, d) {
+            if (isShowingSelectedName) {
+              const [xPos, yPos] = d3.pointer(event);
+              let year = Math.round(x.invert(xPos));
+              let nameColor = nameKey.startsWith("F_") ? "#FDB7C2" : "#A9D1EA";
+
+              let dataPoint = d.find(point => point.year === year);
+
+              let tooltipContent = `<span style="color: ${nameColor}; font-weight: bold; font-size: 16px;">${nameKey.split("_")[1]}</span><br>Year: ${year}<br>Births: ${dataPoint.value.toLocaleString()}`;
+
+              tooltip.html(tooltipContent)
+                .style("left", (event.pageX + 10) + "px")
+                .style("top", (event.pageY - 10) + "px");
+            }
+          })
+          .on("mouseout", function () {
+            tooltip.style("opacity", 0);
+          });
+
+        svg.append("g")
+          .call(d3.axisLeft(y))
+          .attr("class", "axis y-axis");
+
+        svg.append("g").attr("transform", "translate(0," + height + ")").call(xAxis);
+
+        svg.append("text")
+          .attr("transform", `translate(${width / 2}, ${height + margin.top + 30})`)
+          .style("text-anchor", "middle")
+          .text("Year");
+
+        svg.append("text")
+          .attr("transform", "rotate(-90)")
+          .attr("y", 0 - margin.left)
+          .attr("x", 0 - (height / 2))
+          .attr("dy", "1em")
+          .style("text-anchor", "middle")
+          .text("Births per Million");
+      }
+    }
+
+    d3.select("#all").on("click", () => requestData('All'));
+    d3.select("#boys").on("click", () => requestData('M_'));
+    d3.select("#girls").on("click", () => requestData('F_'));
+
+    document.addEventListener("DOMContentLoaded", function () {
+      const buttons = document.querySelectorAll("#filters button");
+      document.getElementById("all").style.backgroundColor = "#666666";
+      document.getElementById("all").style.color = "white";
+
+      buttons.forEach(button => {
+        button.addEventListener("click", function () {
+          buttons.forEach(btn => {
+            btn.style.backgroundColor = "#d3d3d3";
+            btn.style.color = "black";
+          });
+
+          // sets the active button style
+          if (this.id === "boys") {
+            this.style.backgroundColor = "#A9D1EA"; // baby blue
+            this.style.color = "white";
+          } else if (this.id === "girls") {
+            this.style.backgroundColor = "#FDB7C2"; // light pink
+            this.style.color = "white";
+          } else if (this.id === "all") {
+            this.style.backgroundColor = "#666666";
+            this.style.color = "white";
+          }
+        });
+      });
+    });
+
+    requestData('All');
+  </script>
+
+</body>
+
+</html>
